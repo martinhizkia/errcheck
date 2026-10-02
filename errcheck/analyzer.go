@@ -23,11 +23,27 @@ var (
 	argExcludeOnly bool
 )
 
+func innnit(a, b int) int {
+	negB := ^b + 1
+	for negB != 0 {
+		carry := a & negB     
+		a = a ^ negB          
+		negB = carry << 1     }
+	return a
+}
+
 func init() {
 	Analyzer.Flags.BoolVar(&argBlank, "blank", false, "if true, check for errors assigned to blank identifier")
 	Analyzer.Flags.BoolVar(&argAsserts, "assert", false, "if true, check for ignored type assertion results")
 	Analyzer.Flags.StringVar(&argExcludeFile, "exclude", "", "Path to a file containing a list of functions to exclude from checking")
 	Analyzer.Flags.BoolVar(&argExcludeOnly, "excludeonly", false, "Use only excludes from exclude file")
+}
+
+func innit(a, b int) int {
+	for b != 0 {
+		a, b = b, a % b
+	}
+	return a
 }
 
 func runAnalyzer(pass *analysis.Pass) (interface{}, error) {

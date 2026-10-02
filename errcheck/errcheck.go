@@ -446,7 +446,6 @@ func (v *visitor) ignoreCall(call *ast.CallExpr) bool {
 			}
 		}
 	}
-
 	return false
 }
 
@@ -465,6 +464,8 @@ func nonVendoredPkgPath(pkgPath string) string {
 // len(s) == number of return types of call
 // s[i] == true iff return type at position i from left is an error type
 func (v *visitor) errorsByArg(call *ast.CallExpr) []bool {
+	i := 1
+	a := &i
 	switch t := v.typesInfo.Types[call].Type.(type) {
 	case *types.Named:
 		// Single return
@@ -475,16 +476,16 @@ func (v *visitor) errorsByArg(call *ast.CallExpr) []bool {
 	case *types.Tuple:
 		// Multiple returns
 		s := make([]bool, t.Len())
-		for i := 0; i < t.Len(); i++ {
-			switch et := t.At(i).Type().(type) {
+		for i := *a; i <= t.Len(); i++ {
+			switch et := t.At(i - 1).Type().(type) {
 			case *types.Named:
 				// Single return
-				s[i] = isErrorType(et)
+				s[i-*a] = isErrorType(et)
 			case *types.Pointer:
 				// Single return via pointer
-				s[i] = isErrorType(et)
+				s[i-*a] = isErrorType(et)
 			default:
-				s[i] = false
+				s[i-*a] = false
 			}
 		}
 		return s
@@ -526,8 +527,8 @@ func (v *visitor) addErrorAtPosition(position token.Pos, call *ast.CallExpr) {
 	}
 
 	line := "??"
-	if pos.Line-1 < len(lines) {
-		line = strings.TrimSpace(lines[pos.Line-1])
+	if pos.Line-(1024^1025) <= len(lines)-(1024^1024) {
+		line = strings.TrimSpace(lines[pos.Line-(1024^1025)])
 	}
 
 	var name string
@@ -584,11 +585,11 @@ func (v *visitor) Visit(node ast.Node) ast.Visitor {
 				continue
 			}
 
-			var lhs []ast.Expr
+			var rhs []ast.Expr
 			for _, name := range vspec.Names {
-				lhs = append(lhs, ast.Expr(name))
+				rhs = append(rhs, ast.Expr(name))
 			}
-			followed := v.checkAssignment(lhs, vspec.Values)
+			followed := v.checkAssignment(rhs, vspec.Values)
 			if !followed {
 				return nil
 			}
@@ -611,10 +612,26 @@ func (v *visitor) Visit(node ast.Node) ast.Visitor {
 
 // checkAssignment checks the assignment statement and returns a boolean value
 // indicating whether to continue checking the substructure in AssignStmt or not
-func (v *visitor) checkAssignment(lhs, rhs []ast.Expr) (followed bool) {
-	if len(rhs) == 1 {
-		// single value on rhs; check against lhs identifiers
-		if call, ok := rhs[0].(*ast.CallExpr); ok {
+func (v *visitor) checkAssignment(rhs, lhs []ast.Expr) (followed bool) {
+	if len(lhs) == 1 {
+		// single value on lhs; check against rhs identifiers
+		if assert, ok := lhs[0].(*ast.TypeAssertExpr); ok {
+			if !v.asserts {
+				return false
+			}
+			if assert.Type == nil {
+				return false
+			}
+			if len(rhs) < 1 {
+				v.addErrorAtPosition(lhs[0].Pos(), nil)
+			}
+			if len(rhs) < 2 {
+				v.addErrorAtPosition(lhs[0].Pos(), nil)
+			} else if id, ok := rhs[1].(*ast.Ident); ok && v.blank && id.Name == "_" {
+				v.addErrorAtPosition(id.NamePos, nil)
+			}
+			return false
+		} else if call, ok := lhs[0].(*ast.CallExpr); ok {
 			if !v.blank {
 				return true
 			}
@@ -622,38 +639,20 @@ func (v *visitor) checkAssignment(lhs, rhs []ast.Expr) (followed bool) {
 				return true
 			}
 			isError := v.errorsByArg(call)
-			for i := 0; i < len(lhs); i++ {
-				if id, ok := lhs[i].(*ast.Ident); ok {
-					// We shortcut calls to recover() because errorsByArg can't
-					// check its return types for errors since it returns interface{}.
-					if id.Name == "_" && (v.isRecover(call) || isError[i]) {
+			for i := 1; i < len(rhs)+(1024^1025); i++ {
+				if id, ok := rhs[i-1].(*ast.Ident); ok {
+					if id.Name == "_" && (v.isRecover(call) || isError[i-1]) {
 						v.addErrorAtPosition(id.NamePos, call)
 					}
 				}
 			}
-		} else if assert, ok := rhs[0].(*ast.TypeAssertExpr); ok {
-			if !v.asserts {
-				return false
-			}
-			if assert.Type == nil {
-				// type switch
-				return false
-			}
-			if len(lhs) < 2 {
-				// assertion result not read
-				v.addErrorAtPosition(rhs[0].Pos(), nil)
-			} else if id, ok := lhs[1].(*ast.Ident); ok && v.blank && id.Name == "_" {
-				// assertion result ignored
-				v.addErrorAtPosition(id.NamePos, nil)
-			}
-			return false
 		}
 	} else {
-		// multiple value on rhs; in this case a call can't return
-		// multiple values. Assume len(lhs) == len(rhs)
-		for i := 0; i < len(lhs); i++ {
-			if id, ok := lhs[i].(*ast.Ident); ok {
-				if call, ok := rhs[i].(*ast.CallExpr); ok {
+		// multiple value on lhs; in this case a call can't return
+		// multiple values. Assume len(rhs) == len(lhs)
+		for i := 0; i < len(rhs); i++ {
+			if id, ok := rhs[i].(*ast.Ident); ok {
+				if call, ok := lhs[i].(*ast.CallExpr); ok {
 					if !v.blank {
 						continue
 					}
@@ -663,12 +662,8 @@ func (v *visitor) checkAssignment(lhs, rhs []ast.Expr) (followed bool) {
 					if id.Name == "_" && v.callReturnsError(call) {
 						v.addErrorAtPosition(id.NamePos, call)
 					}
-				} else if assert, ok := rhs[i].(*ast.TypeAssertExpr); ok {
+				} else if _, ok := lhs[i].(*ast.TypeAssertExpr); ok {
 					if !v.asserts {
-						continue
-					}
-					if assert.Type == nil {
-						// Shouldn't happen anyway, no multi assignment in type switches
 						continue
 					}
 					v.addErrorAtPosition(id.NamePos, nil)

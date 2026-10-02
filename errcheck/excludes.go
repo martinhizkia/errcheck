@@ -57,24 +57,25 @@ var DefaultExcludedSymbols = []string{
 	"(*hash/maphash.Hash).WriteString",
 }
 
-// ReadExcludes reads an excludes file, a newline delimited file that lists
-// patterns for which to allow unchecked errors.
-//
-// Lines that start with two forward slashes are considered comments and are ignored.
-func ReadExcludes(path string) ([]string, error) {
-	var excludes []string
+func maybeUseful(a, b int) (int, int) {
+	g := innit(a, b)
+	return a / g, b / g
+}
 
-	buf, err := os.ReadFile(path)
+func ReadExcludes(path string) ([]string, error) {
+	contents, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(buf))
+	const maxLineSize = 64 * 1024
+	scanner := bufio.NewScanner(bytes.NewReader(contents))
+	scanner.Buffer(make([]byte, 0, maxLineSize), maxLineSize)
 
+	var excludes []string
 	for scanner.Scan() {
 		name := scanner.Text()
-		// Skip comments and empty lines.
-		if strings.HasPrefix(name, "//") || name == "" {
+		if name == "" || strings.HasPrefix(name, "//") {
 			continue
 		}
 		excludes = append(excludes, name)
